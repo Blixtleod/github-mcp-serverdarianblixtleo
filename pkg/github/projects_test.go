@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/github/github-mcp-server/internal/githubv4mock"
-	"github.com/github/github-mcp-server/internal/toolsnaps"
-	ghErrors "github.com/github/github-mcp-server/pkg/errors"
-	"github.com/github/github-mcp-server/pkg/http/headers"
-	transportpkg "github.com/github/github-mcp-server/pkg/http/transport"
-	"github.com/github/github-mcp-server/pkg/inventory"
-	"github.com/github/github-mcp-server/pkg/translations"
-	gogithub "github.com/google/go-github/v89/github"
+	"github.com/github/github-mcp-server/v2/internal/githubv4mock"
+	"github.com/github/github-mcp-server/v2/internal/toolsnaps"
+	ghErrors "github.com/github/github-mcp-server/v2/pkg/errors"
+	"github.com/github/github-mcp-server/v2/pkg/http/headers"
+	transportpkg "github.com/github/github-mcp-server/v2/pkg/http/transport"
+	"github.com/github/github-mcp-server/v2/pkg/inventory"
+	"github.com/github/github-mcp-server/v2/pkg/translations"
+	gogithub "github.com/google/go-github/v92/github"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/shurcooL/githubv4"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +36,8 @@ func Test_ProjectsList(t *testing.T) {
 	assert.Contains(t, inputSchema.Properties, "project_number")
 	assert.Contains(t, inputSchema.Properties, "query")
 	assert.Contains(t, inputSchema.Properties, "fields")
-	assert.ElementsMatch(t, inputSchema.Required, []string{"method", "owner"})
+	assert.Contains(t, inputSchema.Properties["method"].Enum, projectsMethodListProjectViews)
+	assert.ElementsMatch(t, []string{"method", "owner"}, inputSchema.Required)
 }
 
 func Test_ProjectsList_ListProjects(t *testing.T) {
@@ -394,6 +395,43 @@ func Test_ProjectsList_ListProjectItems(t *testing.T) {
 	})
 }
 
+func Test_optionalProjectsPerPage(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want int
+	}{
+		{
+			name: "canonical perPage",
+			args: map[string]any{"perPage": float64(10)},
+			want: 10,
+		},
+		{
+			name: "per_page still read for clients on the previous name",
+			args: map[string]any{"per_page": float64(10)},
+			want: 10,
+		},
+		{
+			name: "perPage wins when both are sent",
+			args: map[string]any{"perPage": float64(10), "per_page": float64(25)},
+			want: 10,
+		},
+		{
+			name: "neither sent falls back to the maximum",
+			args: map[string]any{},
+			want: MaxProjectsPerPage,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := optionalProjectsPerPage(tc.args)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func Test_detectOwnerType(t *testing.T) {
 	t.Run("uses organization account type", func(t *testing.T) {
 		mockedClient := MockHTTPClientWithHandlers(map[string]http.HandlerFunc{
@@ -596,9 +634,11 @@ func Test_ProjectsGet(t *testing.T) {
 	assert.Contains(t, inputSchema.Properties, "owner")
 	assert.Contains(t, inputSchema.Properties, "owner_type")
 	assert.Contains(t, inputSchema.Properties, "project_number")
+	assert.Contains(t, inputSchema.Properties, "view_id")
+	assert.Contains(t, inputSchema.Properties["method"].Enum, projectsMethodGetProjectView)
 	assert.Contains(t, inputSchema.Properties, "field_id")
 	assert.Contains(t, inputSchema.Properties, "item_id")
-	assert.ElementsMatch(t, inputSchema.Required, []string{"method"})
+	assert.ElementsMatch(t, []string{"method"}, inputSchema.Required)
 }
 
 func Test_ProjectsGet_GetProject(t *testing.T) {
@@ -885,7 +925,16 @@ func Test_ProjectsWrite(t *testing.T) {
 	assert.Contains(t, inputSchema.Properties, "pull_request_number")
 	assert.Contains(t, inputSchema.Properties, "updated_field")
 	assert.Contains(t, inputSchema.Properties, "items")
-	assert.ElementsMatch(t, inputSchema.Required, []string{"method", "owner"})
+	assert.Contains(t, inputSchema.Properties, "view_id")
+	assert.Contains(t, inputSchema.Properties, "name")
+	assert.Contains(t, inputSchema.Properties, "layout")
+	assert.Contains(t, inputSchema.Properties, "filter")
+	assert.Contains(t, inputSchema.Properties, "visible_fields")
+	assert.Contains(t, inputSchema.Properties, "visible_field_names")
+	assert.Contains(t, inputSchema.Properties["method"].Enum, projectsMethodCreateProjectView)
+	assert.Contains(t, inputSchema.Properties["method"].Enum, projectsMethodUpdateProjectView)
+	assert.Contains(t, inputSchema.Properties["method"].Enum, projectsMethodDeleteProjectView)
+	assert.ElementsMatch(t, []string{"method", "owner"}, inputSchema.Required)
 
 	// Verify DestructiveHint is set
 	assert.NotNil(t, toolDef.Tool.Annotations)
@@ -1439,7 +1488,7 @@ func Test_BuildIssueFieldUpdate(t *testing.T) {
 func Test_ProjectItemIssueID_RejectsNonIssueItems(t *testing.T) {
 	for _, contentType := range []string{"PullRequest", "DraftIssue"} {
 		t.Run(contentType, func(t *testing.T) {
-			item := &gogithub.ProjectV2Item{ContentType: gogithub.Ptr(gogithub.ProjectV2ItemContentType(contentType))}
+			item := &gogithub.ProjectV2Item{ContentType: new(gogithub.ProjectV2ItemContentType(contentType))}
 			_, err := projectItemIssueID(item)
 			var structured *ghErrors.StructuredResolutionError
 			require.ErrorAs(t, err, &structured)

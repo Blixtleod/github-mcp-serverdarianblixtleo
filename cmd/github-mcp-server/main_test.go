@@ -3,9 +3,14 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/github/github-mcp-server/v2/pkg/inventory"
+	"github.com/github/github-mcp-server/v2/pkg/scopes"
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +41,31 @@ func TestLoadAppPrivateKey(t *testing.T) {
 func TestGitHubAppFlagsAreStdioOnly(t *testing.T) {
 	assert.NotNil(t, stdioCmd.Flags().Lookup("app-id"))
 	assert.Nil(t, httpCmd.Flags().Lookup("app-id"))
+}
+
+func TestAuthorizationServerConfigurationIsHTTPOnly(t *testing.T) {
+	flag := httpCmd.Flags().Lookup("authorization-server")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue)
+	assert.Nil(t, stdioCmd.Flags().Lookup("authorization-server"))
+
+	t.Setenv("GITHUB_AUTHORIZATION_SERVER", "")
+	initConfig()
+	assert.Empty(t, viper.GetString("authorization-server"))
+
+	t.Setenv("GITHUB_AUTHORIZATION_SERVER", "https://oauth-proxy.example.com")
+	assert.Equal(t, "https://oauth-proxy.example.com", viper.GetString("authorization-server"))
+}
+
+func TestWriteToolDocScopes(t *testing.T) {
+	tool := inventory.ServerTool{
+		Tool:        mcp.Tool{Name: "delete", Annotations: &mcp.ToolAnnotations{Title: "Delete"}},
+		ScopeAccess: scopes.RequireAll(scopes.DeleteRepo, scopes.Repo),
+	}
+
+	var buf strings.Builder
+	writeToolDoc(&buf, tool)
+	assert.Contains(t, buf.String(), "**OAuth Challenge Scopes**: `delete_repo`, `repo`")
 }
 
 func TestSchemaTypeString(t *testing.T) {
