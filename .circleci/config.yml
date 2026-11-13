@@ -1,0 +1,58 @@
+# CircleCI configuration for Multi-Agent Custom Automation Engine
+# See: https://circleci.com/docs/reference/configuration-reference
+version: 2.1
+
+jobs:
+  test-backend:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: medium
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - backend-deps-v1-{{ checksum "src/backend/uv.lock" }}
+            - backend-deps-v1-
+      - run:
+          name: Install uv
+          command: pip install uv --quiet
+      - run:
+          name: Install dependencies
+          command: cd src/backend && uv sync --frozen --dev
+      - save_cache:
+          key: backend-deps-v1-{{ checksum "src/backend/uv.lock" }}
+          paths:
+            - ~/.cache/uv
+      - run:
+          name: Run backend tests
+          command: cd src/backend && uv run --with pytest pytest tests/ -v --tb=short
+
+  test-frontend:
+    docker:
+      - image: cimg/node:22.19
+    resource_class: medium
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - frontend-deps-v1-{{ checksum "src/App/package-lock.json" }}
+            - frontend-deps-v1-
+      - run:
+          name: Install dependencies
+          command: cd src/App && npm ci
+      - save_cache:
+          key: frontend-deps-v1-{{ checksum "src/App/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: TypeScript type check and build
+          command: cd src/App && npm run build
+      - run:
+          name: Run frontend tests
+          command: cd src/App && npm test -- --run --passWithNoTests
+
+workflows:
+  build-and-test:
+    jobs:
+      - test-backend
+      - test-frontend
